@@ -1,0 +1,23 @@
+.DS_Store
+.idea/
+Thumbs.db
+
+# CodePen copy, generated from the source
+pen/
+
+# Leftovers from the bird version, not used by the game
+flappy-assets/font/
+flappy-assets/image/ClickHand.png
+flappy-assets/image/PlayGame.png
+flappy-assets/image/back.png
+flappy-assets/image/background-*.png
+flappy-assets/image/down.png
+flappy-assets/image/flappy*.gif
+flappy-assets/image/flappy*-dead.png
+flappy-assets/image/line.png
+flappy-assets/image/medal-*.png
+flappy-assets/image/troevkube.png
+flappy-assets/image/up.png
+
+# Local Claude Code preview settings
+.claude/

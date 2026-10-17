@@ -1,0 +1,852 @@
+/*
+ * Tesla Bird
+ * Canvas edition: 640×360 game px rendered at 3× (1920×1080) and letterboxed to the window.
+ * This is the canonical, human-readable source loaded by index.html.
+ */
+
+import {GAME_HEIGHT, GAME_WIDTH, MIN_PILLAR_LENGTH, PIPE_WIDTH, RENDER_SCALE, THEMES, createSettings} from './config.js';
+import {
+    advanceHorizontal,
+    advanceVertical,
+    constrainGapTop,
+    findPipeCollision,
+    formatClock,
+    getBirdHitbox,
+    getCharge,
+    hasBoundaryCollision
+} from './physics.js';
+import {isNewBestScore, readBestScore, readText, writeBestScore, writeText} from './storage.js';
+
+export function FlappyBird(elementId, options = {}) {
+    const settings = createSettings(options);
+    const container = document.getElementById(elementId);
+
+    if (!container) {
+        throw new Error(`Element with id "${elementId}" not found`);
+    }
+
+    const State = Object.freeze({
+        READY: 'ready',
+        PLAYING: 'playing',
+        GAME_OVER: 'game-over',
+        DESTROYED: 'destroyed'
+    });
+
+    // Designed frame (1920×1080). The live stage grows past it to match the window's shape.
+    const BASE_WIDTH = GAME_WIDTH * RENDER_SCALE;
+    const BASE_HEIGHT = GAME_HEIGHT * RENDER_SCALE;
+    const IMAGE_PATH = './flappy-assets/image/';
+    const FONT = '"Jersey 10", monospace';
+    const CAR = {x: 120, width: 42, height: 12, spriteHeight: 15};
+    const WHEELS = [{x: 9, frameOffset: 0}, {x: 33, frameOffset: 2}];
+    const SMOKE = {frames: 14, splashFrames: 4, width: 12, height: 34, seconds: 0.5};
+    const FIN_OVERHANG = 7; // nose and engine sprites stick out past the 26 px hull on each side
+    const INPUT_DELAY_MS = 400;
+    const TOGGLE_THEMES = [{name: 'night', label: 'NIGHT'}, {name: 'dawn', label: 'DAWN'}, {name: 'day', label: 'DAY'}];
+    // Icons: Dinkie Icons by atelierAnchor (https://github.com/atelier-anchor/dinkie-icons).
+    const SOCIAL_LINKS = [
+        {
+            label: 'Tesla Bird source code on GitHub',
+            href: 'https://github.com/troshkinpavel/tesla-bird',
+            path: 'M2 12h2v-1H3v-1H2V9H1V8h1v1h1v1h1V9h1V8H3V7H2V4h1V2h1v1h3V2h1v2h1v3H8v1H6v1h1v3h2v-1h1v-1h1V3h-1V2H9V1H2v1H1v1H0v7h1v1h1Zm0 0'
+        },
+        {
+            label: '@troshkin_pavel on X',
+            href: 'https://x.com/troshkin_pavel',
+            path: 'M1 3h1V2h2V1H0v1h1Zm-1 9h1v-1H0Zm1-1h1v-1H1Zm1-1h1V9H2Zm1-1h1V8H3Zm3 2h1V9H6ZM5 9h1V8H5ZM4 8h1V6H4ZM3 6h1V5H3Zm4 6h4v-1h-1v-1H9v1H7ZM2 5h1V3H2Zm6 5h1V8H8ZM7 8h1V7H7ZM6 7h1V5H6ZM5 5h1V4H5ZM4 4h1V2H4Zm3 1h1V4H7Zm1-1h1V3H8Zm1-1h1V2H9Zm1-1h1V1h-1Zm0 0'
+        }
+    ];
+    const PLAY_BUTTON = {x: 840, y: 864, width: 240, height: 96};
+    const TIMELINE_NODES = [
+        {score: 0, label: 'LIFTOFF'},
+        {score: 10, label: '25%'},
+        {score: 20, label: '50%'},
+        {score: 30, label: '75%'},
+        {score: 40, label: 'FULL'}
+    ];
+    const COLOR = {
+        text: '#f4f4f4',
+        label: '#d8dade',
+        secondary: '#9a9da4',
+        red: '#e0262f',
+        redLight: '#ff5a5f',
+        panel: '#101114',
+        inactive: '#4a4d55',
+        track: '#7a7d85',
+        title: '#eaf3ff',
+        key: '#0b0a1a'
+    };
+
+    const images = {};
+    const gaugeCache = new Map();
+    const gaugeGeometry = createGaugeGeometry();
+
+    let state = State.READY;
+    let isLoaded = false;
+    let pipes = [];
+    let smokes = [];
+    let score = 0;
+    let bestScore = readBestScore(settings.storageKey);
+    let runs = readBestScore(settings.runsKey); // same non-negative integer format as the best score
+    let isNewBest = false;
+    let screenWidth = BASE_WIDTH;
+    let screenHeight = BASE_HEIGHT;
+    let gameWidth = GAME_WIDTH;
+    let gameHeight = GAME_HEIGHT;
+    let carX = 0;
+    let carY = 0;
+    let velocityY = 0;
+    let carAngle = 0;
+    let elapsed = 0;
+    let clock = 0;
+    let hasLanded = false;
+    let gameOverShownAt = 0;
+    let frameId = 0;
+    let lastFrameTime = 0;
+
+    container.classList.add('flappy-game');
+    container.setAttribute('role', 'region');
+    container.setAttribute('aria-label', 'Tesla Bird');
+
+    const stage = document.createElement('div');
+    stage.className = 'tb-stage';
+
+    const background = document.createElement('img');
+    background.className = 'tb-background';
+    background.alt = '';
+
+    const dim = document.createElement('div');
+    dim.className = 'tb-dim';
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'tb-canvas';
+    canvas.setAttribute('aria-hidden', 'true');
+    const ctx = canvas.getContext('2d');
+
+    const status = document.createElement('output');
+    status.className = 'tb-visually-hidden';
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = 'Press Space or click to start.';
+
+    const themeToggle = document.createElement('div');
+    themeToggle.className = 'tb-theme-toggle';
+    themeToggle.setAttribute('role', 'group');
+    themeToggle.setAttribute('aria-label', 'Theme');
+    themeToggle.hidden = true;
+    for (const {name, label} of TOGGLE_THEMES) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.theme = name;
+        button.textContent = label;
+        themeToggle.append(button);
+    }
+    themeToggle.addEventListener('click', handleThemeClick);
+
+    const socialLinks = document.createElement('nav');
+    socialLinks.className = 'tb-social';
+    socialLinks.setAttribute('aria-label', 'Links');
+    socialLinks.hidden = true;
+    for (const {label, href, path} of SOCIAL_LINKS) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.setAttribute('aria-label', label);
+        link.title = label;
+        link.innerHTML = `<svg viewBox="0 0 12 12" aria-hidden="true"><path fill="currentColor" d="${path}"/></svg>`;
+        socialLinks.append(link);
+    }
+    // Mouse clicks drop focus so the next Space starts the game instead of being swallowed by the link.
+    socialLinks.addEventListener('click', (event) => {
+        if (event.detail > 0) event.target.closest('a')?.blur();
+    });
+
+    // An explicit theme option (e.g. ?theme=) wins, then the last splash-screen choice, then the browser's light/dark setting.
+    const savedTheme = readText(settings.themeKey);
+    const browserTheme = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'day' : settings.theme;
+    let themeName = options.theme ?? (Object.hasOwn(THEMES, savedTheme ?? '') ? savedTheme : browserTheme);
+    applyTheme(themeName);
+
+    stage.append(background, dim, canvas, themeToggle, socialLinks);
+    container.replaceChildren(stage, status);
+
+    container.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(fitStage) : null;
+    if (resizeObserver) {
+        resizeObserver.observe(container);
+    } else {
+        window.addEventListener('resize', fitStage);
+    }
+    fitStage();
+
+    loadAssets().then(() => {
+        if (state === State.DESTROYED) return;
+        isLoaded = true;
+        showStartScreen();
+        lastFrameTime = performance.now();
+        frameId = requestAnimationFrame(gameLoop);
+    });
+
+    if (settings.debug) {
+        console.info('Tesla Bird debug mode enabled', settings);
+    }
+
+    return Object.freeze({
+        start: startGame,
+        restart: showStartScreen,
+        destroy,
+        getState: () => state,
+        getScore: () => score,
+        getBestScore: () => bestScore,
+        getDifficulty: () => settings.difficulty,
+        getTheme: () => themeName
+    });
+
+    function loadAssets() {
+        const names = [
+            'car_idle', 'car_crashed', 'smoke_v3_strip', 'rocket_nose', 'rocket_body',
+            'rocket_engine', 'btn_play', 'hint_arrow'
+        ];
+        const imageLoads = names.map((name) => new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = resolve;
+            image.onerror = () => reject(new Error(`Tesla Bird could not load ${name}.png`));
+            image.src = `${IMAGE_PATH}${name}.png`;
+            images[name] = image;
+        }));
+        // A missing web font only changes the typeface, so it must not block the game.
+        const fontLoad = document.fonts?.load(`56px ${FONT}`).catch(() => null);
+        return Promise.all([...imageLoads, fontLoad]);
+    }
+
+    // The shorter side keeps the designed size; the other grows (in whole game px) to fill the window.
+    function fitStage() {
+        const windowWidth = container.clientWidth || BASE_WIDTH;
+        const windowHeight = container.clientHeight || BASE_HEIGHT;
+        const isWider = windowWidth / windowHeight > BASE_WIDTH / BASE_HEIGHT;
+        const snap = (value) => Math.round(value / RENDER_SCALE) * RENDER_SCALE;
+
+        screenWidth = isWider ? snap(BASE_HEIGHT * windowWidth / windowHeight) : BASE_WIDTH;
+        screenHeight = isWider ? BASE_HEIGHT : snap(BASE_WIDTH * windowHeight / windowWidth);
+        gameWidth = screenWidth / RENDER_SCALE;
+        gameHeight = screenHeight / RENDER_SCALE;
+
+        stage.style.width = `${screenWidth}px`;
+        stage.style.height = `${screenHeight}px`;
+        if (canvas.width !== screenWidth) canvas.width = screenWidth;
+        if (canvas.height !== screenHeight) canvas.height = screenHeight;
+        // max, not min: snapping can leave the stage a fraction short, and a hairline bar is worse than a 1 px crop.
+        const scale = Math.max(windowWidth / screenWidth, windowHeight / screenHeight);
+        stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+
+        if (state === State.READY) generatePipes();
+        if (hasLanded) carY = getRestY();
+    }
+
+    function getStartX() {
+        return (gameWidth - CAR.width) / 2;
+    }
+
+    function getStartY() {
+        return gameHeight / 2 - 10;
+    }
+
+    function getRestY() {
+        return gameHeight - 13;
+    }
+
+    // Offset that centres the designed 1920×1080 menu layout on the live stage.
+    function getMenuOffset() {
+        return {x: (screenWidth - BASE_WIDTH) / 2, y: (screenHeight - BASE_HEIGHT) / 2};
+    }
+
+    // ---- State ----
+
+    function showStartScreen() {
+        if (state === State.DESTROYED) return;
+
+        state = State.READY;
+        container.dataset.gameState = state;
+        score = 0;
+        elapsed = 0;
+        velocityY = 0;
+        carAngle = 0;
+        carX = getStartX();
+        carY = getStartY();
+        smokes = [];
+        isNewBest = false;
+        hasLanded = false;
+        generatePipes();
+        status.textContent = 'Press Space or click to start.';
+        themeToggle.hidden = false;
+        socialLinks.hidden = false;
+    }
+
+    function applyTheme(name) {
+        const theme = THEMES[name];
+        themeName = name;
+        background.src = IMAGE_PATH + theme.background;
+        dim.style.background = theme.dimColor;
+        dim.style.opacity = String(theme.dim);
+        for (const button of themeToggle.children) {
+            button.setAttribute('aria-pressed', String(button.dataset.theme === name));
+        }
+    }
+
+    function handleThemeClick(event) {
+        const button = event.target.closest('button');
+        if (!button) return;
+        applyTheme(button.dataset.theme);
+        writeText(settings.themeKey, themeName);
+        // Mouse clicks drop focus so the next Space starts the game instead of re-pressing the button.
+        if (event.detail > 0) button.blur();
+    }
+
+    function startGame() {
+        if (state !== State.READY || !isLoaded) return;
+
+        themeToggle.hidden = true;
+        socialLinks.hidden = true;
+        state = State.PLAYING;
+        container.dataset.gameState = state;
+        runs += 1;
+        writeBestScore(settings.runsKey, runs);
+        status.textContent = '';
+        boost();
+    }
+
+    function boost() {
+        velocityY = settings.jumpVelocity;
+        smokes.push({age: 0});
+    }
+
+    function crash() {
+        state = State.GAME_OVER;
+        container.dataset.gameState = state;
+        velocityY = Math.max(0, velocityY);
+        hasLanded = false;
+
+        isNewBest = isNewBestScore(score, bestScore, settings.debug);
+        if (isNewBest) {
+            bestScore = score;
+            writeBestScore(settings.storageKey, bestScore);
+        }
+    }
+
+    function land() {
+        carY = getRestY();
+        velocityY = 0;
+        hasLanded = true;
+        gameOverShownAt = performance.now();
+        status.textContent = `Game over. Score ${score}, best ${bestScore}. Press Space to play again.`;
+    }
+
+    function canRestart() {
+        return state === State.GAME_OVER && hasLanded && performance.now() - gameOverShownAt >= INPUT_DELAY_MS;
+    }
+
+    // ---- Pillars ----
+
+    function generatePipes() {
+        pipes = [];
+        const count = Math.ceil(gameWidth / settings.step) + 2;
+        for (let index = 0; index < count; index += 1) {
+            const pipe = {x: gameWidth + FIN_OVERHANG + settings.step * index, gapTop: 0, gapSize: settings.innerColumn};
+            randomizePipe(pipe, pipes[index - 1]);
+            pipes.push(pipe);
+        }
+    }
+
+    function randomizePipe(pipe, previousPipe) {
+        const minimum = MIN_PILLAR_LENGTH;
+        const maximum = gameHeight - MIN_PILLAR_LENGTH - settings.innerColumn;
+        pipe.gapTop = constrainGapTop(
+            minimum + Math.random() * (maximum - minimum),
+            minimum,
+            maximum,
+            previousPipe?.gapTop,
+            settings.maxGapShift
+        );
+        pipe.scored = false;
+        pipe.collided = false;
+    }
+
+    function recyclePipes() {
+        let farthest = pipes.reduce((best, pipe) => (pipe.x > best.x ? pipe : best));
+        for (const pipe of pipes) {
+            if (pipe.x + PIPE_WIDTH + FIN_OVERHANG >= 0) continue;
+            pipe.x = farthest.x + settings.step;
+            randomizePipe(pipe, farthest);
+            farthest = pipe;
+        }
+    }
+
+    // ---- Loop ----
+
+    function gameLoop(timestamp) {
+        if (state === State.DESTROYED) return;
+
+        const deltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, 0.032);
+        lastFrameTime = timestamp;
+        clock += deltaSeconds;
+        update(deltaSeconds);
+        render();
+        frameId = requestAnimationFrame(gameLoop);
+    }
+
+    function update(deltaSeconds) {
+        smokes.forEach((smoke) => { smoke.age += deltaSeconds; });
+        smokes = smokes.filter((smoke) => smoke.age < SMOKE.seconds);
+        // Ease the pitch toward its target so the car tilts like a vehicle, not a flapping bird.
+        carAngle += (getTargetAngle() - carAngle) * Math.min(1, deltaSeconds * 6);
+
+        if (state === State.READY) {
+            carX = getStartX();
+            carY = getStartY() + Math.sin(clock * 3) * 2; // ±6 screen px bob
+            return;
+        }
+
+        if (state === State.GAME_OVER) {
+            if (hasLanded) return;
+            const motion = advanceVertical(carY, velocityY, settings.gravity, deltaSeconds);
+            carY = motion.position;
+            velocityY = motion.velocity;
+            if (carY >= getRestY()) land();
+            return;
+        }
+
+        elapsed += deltaSeconds;
+        carX += (CAR.x - carX) * Math.min(1, deltaSeconds * 6);
+        const motion = advanceVertical(carY, velocityY, settings.gravity, deltaSeconds);
+        carY = motion.position;
+        velocityY = motion.velocity;
+
+        for (const pipe of pipes) {
+            pipe.x = advanceHorizontal(pipe.x, settings.speed, deltaSeconds);
+        }
+        recyclePipes();
+
+        const hitbox = getBirdHitbox({
+            x: carX,
+            y: carY,
+            width: CAR.width,
+            height: CAR.height,
+            inset: settings.hitboxInset
+        });
+
+        if (hasBoundaryCollision(hitbox, gameHeight)) {
+            crash();
+            if (carY >= getRestY()) land();
+            return;
+        }
+
+        const collision = findPipeCollision(hitbox, pipes, PIPE_WIDTH);
+        if (collision && !settings.debug) {
+            crash();
+            return;
+        }
+        if (collision) collision.pipe.collided = true;
+
+        for (const pipe of pipes) {
+            if (pipe.scored || pipe.x + PIPE_WIDTH >= carX) continue;
+            pipe.scored = true;
+            if (!pipe.collided) score += 1;
+        }
+    }
+
+    // ---- Rendering ----
+
+    function render() {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, screenWidth, screenHeight);
+        ctx.imageSmoothingEnabled = false;
+
+        if (state !== State.READY) drawPipes();
+        drawCar();
+
+        const menu = getMenuOffset();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (state === State.READY) {
+            ctx.translate(menu.x, menu.y);
+            drawStartScreen();
+        } else if (state === State.GAME_OVER && hasLanded) {
+            drawGameOverScreen();
+        } else {
+            drawHud();
+        }
+    }
+
+    function drawPipes() {
+        ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
+        for (const pipe of pipes) {
+            if (pipe.x > gameWidth + FIN_OVERHANG) continue;
+            const x = Math.round(pipe.x * RENDER_SCALE) / RENDER_SCALE;
+            drawPillar(x, pipe.gapTop + pipe.gapSize);
+
+            // Top pillar: the same stack mirrored vertically.
+            ctx.save();
+            ctx.translate(0, gameHeight);
+            ctx.scale(1, -1);
+            drawPillar(x, gameHeight - pipe.gapTop);
+            ctx.restore();
+
+            if (settings.debug) {
+                ctx.strokeStyle = pipe.collided ? COLOR.red : '#4fd8ff';
+                ctx.lineWidth = 1 / RENDER_SCALE;
+                ctx.strokeRect(x, 0, PIPE_WIDTH, pipe.gapTop);
+                ctx.strokeRect(x, pipe.gapTop + pipe.gapSize, PIPE_WIDTH, gameHeight);
+            }
+        }
+    }
+
+    // Bottom pillar: nose at the gap edge, body tiled down, engine at the screen edge cropping the last body.
+    function drawPillar(x, top) {
+        const {rocket_nose: nose, rocket_body: body, rocket_engine: engine} = images;
+        const engineTop = gameHeight - engine.height;
+        for (let y = top + nose.height; y < engineTop; y += body.height) {
+            ctx.drawImage(body, x, y);
+        }
+        ctx.drawImage(engine, x - FIN_OVERHANG, engineTop);
+        ctx.drawImage(nose, x - FIN_OVERHANG + 2 / RENDER_SCALE, top); // +2 screen px centres the nose on the body
+    }
+
+    function drawCar() {
+        const centerX = CAR.width / 2;
+        const centerY = CAR.spriteHeight / 2;
+        ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
+        ctx.translate(carX + centerX, carY + centerY);
+        ctx.rotate(carAngle * Math.PI / 180);
+        ctx.translate(-centerX, -centerY);
+
+        for (const smoke of smokes) {
+            const frame = Math.floor(smoke.age / SMOKE.seconds * SMOKE.frames);
+            for (const wheel of WHEELS) {
+                const wheelFrame = frame + wheel.frameOffset;
+                if (wheelFrame < SMOKE.frames) drawSmokeFrame(wheel, wheelFrame);
+            }
+        }
+
+        if (state === State.READY) {
+            // Splash screen: loop only the first frames so the smoke idles instead of puffing out.
+            const frame = Math.floor(clock / SMOKE.seconds * SMOKE.frames);
+            for (const wheel of WHEELS) {
+                drawSmokeFrame(wheel, (frame + wheel.frameOffset) % SMOKE.splashFrames);
+            }
+        }
+
+        ctx.drawImage(state === State.GAME_OVER ? images.car_crashed : images.car_idle, 0, 0);
+
+        if (settings.debug) {
+            const inset = settings.hitboxInset;
+            ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
+            ctx.strokeStyle = '#4fd8ff';
+            ctx.lineWidth = 1 / RENDER_SCALE;
+            ctx.strokeRect(carX + inset, carY + inset, CAR.width - inset * 2, CAR.height - inset * 2);
+        }
+    }
+
+    function drawSmokeFrame(wheel, frame) {
+        ctx.drawImage(
+            images.smoke_v3_strip,
+            frame * SMOKE.width, 0, SMOKE.width, SMOKE.height,
+            wheel.x - SMOKE.width / 2, 10, SMOKE.width, SMOKE.height
+        );
+    }
+
+    function getTargetAngle() {
+        if (state === State.READY) return 0;
+        if (hasLanded) return 4;
+        if (velocityY < 0) return -12;
+        return -12 + 42 * Math.min(1, velocityY / 500); // nose-down tops out at 30°
+    }
+
+    function drawStartScreen() {
+        drawText('TESLA BIRD', BASE_WIDTH / 2, 180, 240, COLOR.title, {align: 'center', spacing: 14, shadow: 8});
+
+        // "ROCKET" badge overlapping the lower right of "BIRD", slightly tilted.
+        setFont(240, 14);
+        const titleRight = BASE_WIDTH / 2 + (ctx.measureText('TESLA BIRD').width - 14) / 2;
+        ctx.save();
+        ctx.translate(titleRight, 326);
+        ctx.rotate(-4 * Math.PI / 180);
+        drawText('ROCKET', 0, 0, 72, COLOR.red, {align: 'right', spacing: 6, shadow: 4});
+        ctx.restore();
+        ctx.drawImage(images.hint_arrow, 946, 600, 27, 24);
+
+        // [CLICK] OR [SPACE], centred at top 656 with a 28 px gap.
+        const size = 56;
+        const {ascent, descent} = getFontMetrics(size);
+        setFont(size, 3);
+        const keyHeight = ascent + descent + 8;
+        const parts = [
+            {text: 'CLICK', key: true},
+            {text: 'OR', key: false},
+            {text: 'SPACE', key: true}
+        ].map((part) => ({...part, width: ctx.measureText(part.text).width + (part.key ? 56 : 0)}));
+        const totalWidth = parts.reduce((sum, part) => sum + part.width, 0) + 28 * (parts.length - 1);
+        let x = BASE_WIDTH / 2 - totalWidth / 2;
+        const baseline = 656 + 4 + ascent;
+
+        for (const part of parts) {
+            if (part.key) {
+                fillRect(x, 656, part.width, keyHeight, COLOR.title);
+                fillRect(x + 4, 660, part.width - 8, keyHeight - 8, COLOR.key);
+                fillText(part.text, x + 28, baseline, COLOR.title);
+            } else {
+                fillText(part.text, x + 4, baseline + 4, '#000');
+                fillText(part.text, x, baseline, COLOR.title);
+            }
+            x += part.width + 28;
+        }
+    }
+
+    function drawHud() {
+        const bandAlphas = [0.15, 0.35, 0.55, 0.7, 0.8];
+        bandAlphas.forEach((alpha, index) => {
+            ctx.globalAlpha = alpha;
+            fillRect(0, screenHeight - 300 + index * 60, screenWidth, 60, '#000');
+        });
+        ctx.globalAlpha = 1;
+
+        // Designed at 1920×1080: pinned to the bottom; clock left, gauges right, timeline centred.
+        const extraY = screenHeight - BASE_HEIGHT;
+        const extraX = screenWidth - BASE_WIDTH;
+        drawClock(72, 918 + extraY, 'left');
+        drawText(`TESLA BIRD · RUN ${String(runs).padStart(2, '0')}`, 160, 1010 + extraY, 34, COLOR.label, {spacing: 3});
+        drawTimeline({left: 650 + extraX / 2, top: 913 + extraY, width: 640, start: 20, step: 15, isFinal: false});
+
+        const altitude = Math.max(0, Math.round(gameHeight - (carY + CAR.height)));
+        const hudGauge = {scale: 3, label: [40, 30], value: [66, 76], unit: [132, 26]};
+        drawGauge(1440 + extraX, 856 + extraY, hudGauge, (score % 10) / 10, COLOR.text, 'SCORE', score, 'PTS');
+        drawGauge(1440 + 192 + 40 + extraX, 856 + extraY, hudGauge, altitude / gameHeight, COLOR.text, 'ALTITUDE', altitude, 'M');
+    }
+
+    function drawGameOverScreen() {
+        ctx.globalAlpha = 0.4;
+        fillRect(0, 0, screenWidth, screenHeight, '#000');
+        ctx.globalAlpha = 1;
+        const menu = getMenuOffset();
+        ctx.translate(menu.x, menu.y);
+
+        drawText('GAME OVER', BASE_WIDTH / 2, 96, 200, COLOR.title, {align: 'center', spacing: 12, shadow: 8});
+
+        const charge = getCharge(score);
+        const overGauge = {scale: 4, label: [54, 38], value: [88, 100], unit: [176, 32]};
+        drawGauge(512, 316, overGauge, charge / 100, COLOR.red, 'CHARGE', charge, '%');
+        drawGauge(512 + 320, 316, overGauge, score / 40, COLOR.text, 'SCORE', score, 'PTS');
+        drawGauge(512 + 640, 316, overGauge, bestScore / 40, COLOR.text, 'BEST', bestScore, 'PTS');
+
+        drawTimeline({left: 440, top: 584, width: 1040, start: 60, step: 23, isFinal: true});
+        drawClock(BASE_WIDTH / 2, 722, 'center');
+        ctx.drawImage(images.btn_play, PLAY_BUTTON.x, PLAY_BUTTON.y, PLAY_BUTTON.width, PLAY_BUTTON.height);
+    }
+
+    // "T+" (64 px) and "HH:MM:SS" (120 px), baseline-aligned with a 14 px gap, line-height 0.8.
+    function drawClock(x, top, align) {
+        const time = formatClock(elapsed);
+        const baseline = getBaseline(top, 120, 0.8);
+        setFont(64, 0);
+        const prefixWidth = ctx.measureText('T+').width;
+        setFont(120, 4);
+        const timeWidth = ctx.measureText(time).width;
+        const left = align === 'center' ? x - (prefixWidth + 14 + timeWidth) / 2 : x;
+
+        setFont(64, 0);
+        fillText('T+', left, baseline, COLOR.secondary);
+        setFont(120, 4);
+        fillText(time, left + prefixWidth + 14, baseline, COLOR.text);
+    }
+
+    function drawTimeline({left, top, width, start, step, isFinal}) {
+        const scoreX = (value) => left + start + Math.min(40, value) * step;
+        const currentX = scoreX(score);
+
+        fillRect(left, top + 48, width, 3, COLOR.track);
+        fillRect(left, top + 48, currentX - left, 3, COLOR.text);
+
+        for (const node of TIMELINE_NODES) {
+            const x = scoreX(node.score);
+            const isReached = score >= node.score;
+            fillRect(x - 9, top + 41, 18, 18, isReached ? COLOR.text : COLOR.track);
+            fillRect(x - 6, top + 44, 12, 12, COLOR.panel);
+            if (isReached) fillRect(x - 3, top + 47, 6, 6, COLOR.text);
+        }
+
+        if (isFinal) {
+            fillRect(currentX - 9, top + 32, 18, 35, COLOR.red);
+        } else {
+            fillRect(currentX - 3, top + 36, 6, 27, COLOR.red);
+        }
+
+        TIMELINE_NODES.forEach((node, index) => {
+            const x = scoreX(node.score);
+            // Labels alternate above/below; a lower label moves up when the crash label needs the space.
+            const isAbove = index % 2 === 0 || (isFinal && Math.abs(x - currentX) < 140);
+            const color = score >= node.score ? COLOR.label : COLOR.secondary;
+            drawText(node.label, x, top + (isAbove ? 0 : 76), 34, color, {align: 'center', spacing: 2});
+        });
+
+        if (isFinal) {
+            drawText(`CRASH · ${score}`, currentX, top + 76, 34, COLOR.redLight, {align: 'center', spacing: 2});
+        }
+    }
+
+    function drawGauge(x, y, layout, fraction, fill, label, value, unit) {
+        const {scale} = layout;
+        ctx.drawImage(getGaugeImage(fraction, fill), x, y, 64 * scale, 56 * scale);
+        const centerX = x + 32 * scale;
+        drawText(label, centerX, y + layout.label[0], layout.label[1], COLOR.label, {align: 'center', spacing: 2});
+        drawText(String(value), centerX, y + layout.value[0], layout.value[1], COLOR.text, {align: 'center', spacing: 2});
+        drawText(unit, centerX, y + layout.unit[0], layout.unit[1], COLOR.secondary, {align: 'center', spacing: 2});
+    }
+
+    // ---- Pixel-art arc gauge (64×56 game px, centre 32,32, 270° sweep from bottom-left over the top) ----
+
+    function createGaugeGeometry() {
+        const pixels = [];
+        for (let y = 0; y < 56; y += 1) {
+            for (let x = 0; x < 64; x += 1) {
+                const dx = x + 0.5 - 32;
+                const dy = y + 0.5 - 32;
+                const distance = Math.hypot(dx, dy);
+                const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+                const sweep = ((angle - 135 + 360) % 360) / 270;
+                let kind = null;
+                if (distance < 26) kind = 'disc';
+                else if (distance >= 31 && distance < 32.5) kind = 'halo';
+                else if (distance >= 27 && distance < 30 && sweep <= 1) kind = sweep <= 0.025 ? 'tick' : 'ring';
+                else if (distance >= 23 && distance < 27 && sweep <= 0.025) kind = 'tick';
+                pixels.push({kind, sweep});
+            }
+        }
+        return pixels;
+    }
+
+    function getGaugeImage(fraction, fill) {
+        const clamped = Math.min(1, Math.max(0, fraction));
+        const key = `${fill}:${clamped.toFixed(3)}`;
+        if (gaugeCache.has(key)) return gaugeCache.get(key);
+
+        const gauge = document.createElement('canvas');
+        gauge.width = 64;
+        gauge.height = 56;
+        const gaugeContext = gauge.getContext('2d');
+        const data = gaugeContext.createImageData(64, 56);
+        const colors = {
+            disc: [0, 0, 0, 128],
+            halo: [0, 0, 0, 115],
+            tick: [...hexToRgb(COLOR.text), 255],
+            fill: [...hexToRgb(fill), 255],
+            empty: [...hexToRgb(COLOR.inactive), 255]
+        };
+
+        gaugeGeometry.forEach(({kind, sweep}, index) => {
+            if (!kind) return;
+            const color = kind === 'ring' ? (sweep <= clamped ? colors.fill : colors.empty) : colors[kind];
+            data.data.set(color, index * 4);
+        });
+        gaugeContext.putImageData(data, 0, 0);
+        gaugeCache.set(key, gauge);
+        return gauge;
+    }
+
+    function hexToRgb(hex) {
+        const value = Number.parseInt(hex.slice(1), 16);
+        return [value >> 16, (value >> 8) & 255, value & 255];
+    }
+
+    // ---- Text helpers (positions follow CSS: `top` is the top of a line box with the given line-height) ----
+
+    function drawText(text, x, top, size, color, {align = 'left', spacing = 0, shadow = 0, lineHeight = 1} = {}) {
+        const baseline = getBaseline(top, size, lineHeight);
+        setFont(size, spacing, align);
+        if (shadow) fillText(text, x + shadow, baseline + shadow, '#000');
+        fillText(text, x, baseline, color);
+        ctx.textAlign = 'left';
+    }
+
+    function getBaseline(top, size, lineHeight) {
+        const {ascent, descent} = getFontMetrics(size);
+        return top + (size * lineHeight - (ascent + descent)) / 2 + ascent;
+    }
+
+    function getFontMetrics(size) {
+        setFont(size, 0);
+        const metrics = ctx.measureText('M');
+        return {ascent: metrics.fontBoundingBoxAscent ?? size * 0.8, descent: metrics.fontBoundingBoxDescent ?? size * 0.2};
+    }
+
+    function setFont(size, spacing, align = 'left') {
+        ctx.font = `${size}px ${FONT}`;
+        ctx.letterSpacing = `${spacing}px`;
+        ctx.textAlign = align;
+        ctx.textBaseline = 'alphabetic';
+    }
+
+    function fillText(text, x, y, color) {
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+    }
+
+    function fillRect(x, y, width, height, color) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, width, height);
+    }
+
+    // ---- Input ----
+
+    function handlePointerDown(event) {
+        if (event.button !== 0 || event.target.closest?.('#debug, .tb-theme-toggle, .tb-social')) return;
+        event.preventDefault();
+
+        if (state === State.READY) {
+            startGame();
+        } else if (state === State.PLAYING) {
+            boost();
+        } else if (canRestart() && isOnPlayButton(event)) {
+            showStartScreen();
+        }
+    }
+
+    function handleKeyDown(event) {
+        const gameKeys = ['ArrowUp', 'KeyW', 'Space'];
+        if (!gameKeys.includes(event.code) || event.target.closest?.('#debug, .tb-theme-toggle, .tb-social')) return;
+        event.preventDefault();
+        if (event.repeat) return;
+
+        if (state === State.READY) {
+            startGame();
+        } else if (state === State.PLAYING) {
+            boost();
+        } else if (canRestart()) {
+            showStartScreen();
+        }
+    }
+
+    function isOnPlayButton(event) {
+        const rect = canvas.getBoundingClientRect();
+        const menu = getMenuOffset();
+        const x = (event.clientX - rect.left) * screenWidth / rect.width - menu.x;
+        const y = (event.clientY - rect.top) * screenHeight / rect.height - menu.y;
+        return x >= PLAY_BUTTON.x && x <= PLAY_BUTTON.x + PLAY_BUTTON.width
+            && y >= PLAY_BUTTON.y && y <= PLAY_BUTTON.y + PLAY_BUTTON.height;
+    }
+
+    function destroy() {
+        if (state === State.DESTROYED) return;
+
+        state = State.DESTROYED;
+        container.dataset.gameState = state;
+        cancelAnimationFrame(frameId);
+        resizeObserver?.disconnect();
+        if (!resizeObserver) window.removeEventListener('resize', fitStage);
+        container.removeEventListener('pointerdown', handlePointerDown);
+        document.removeEventListener('keydown', handleKeyDown);
+        container.classList.remove('flappy-game');
+        container.removeAttribute('role');
+        container.removeAttribute('aria-label');
+        container.replaceChildren();
+    }
+}
