@@ -87,6 +87,45 @@
     outline-offset: 4px;
 }
 
+/* GitHub / X links, top-right corner of the splash screen. Icons are on a 12 px grid, drawn at 4×. */
+.tb-social {
+    position: absolute;
+    top: 48px;
+    right: 48px;
+    display: flex;
+    gap: 16px;
+}
+
+.tb-social[hidden] {
+    display: none;
+}
+
+.tb-social a {
+    display: grid;
+    place-items: center;
+    width: 80px;
+    height: 80px;
+    border: 4px solid #eaf3ff;
+    background: #0b0a1a;
+    color: #eaf3ff;
+}
+
+.tb-social a:hover {
+    background: #eaf3ff;
+    color: #0b0a1a;
+}
+
+.tb-social a:focus-visible {
+    outline: 4px solid #e0262f;
+    outline-offset: 4px;
+}
+
+.tb-social svg {
+    width: 48px;
+    height: 48px;
+    shape-rendering: crispEdges;
+}
+
 .tb-visually-hidden {
     position: absolute;
     width: 1px;

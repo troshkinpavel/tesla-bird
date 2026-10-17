@@ -63,8 +63,21 @@ export function TeslaJoyride(elementId, options = {}) {
     const PARALLAX = 0.2;
     const INPUT_DELAY_MS = 400;
     const GAME_KEYS = ['ArrowUp', 'KeyW', 'Space'];
-    const UI_SELECTOR = '#debug, .tb-theme-toggle';
+    const UI_SELECTOR = '#debug, .tb-theme-toggle, .tb-social';
     const TOGGLE_THEMES = [{name: 'night', label: 'NIGHT'}, {name: 'dawn', label: 'DAWN'}, {name: 'day', label: 'DAY'}];
+    // Icons: Dinkie Icons by atelierAnchor (https://github.com/atelier-anchor/dinkie-icons).
+    const SOCIAL_LINKS = [
+        {
+            label: 'Tesla Joyride source code on GitHub',
+            href: 'https://github.com/troshkinpavel/tesla-bird',
+            path: 'M2 12h2v-1H3v-1H2V9H1V8h1v1h1v1h1V9h1V8H3V7H2V4h1V2h1v1h3V2h1v2h1v3H8v1H6v1h1v3h2v-1h1v-1h1V3h-1V2H9V1H2v1H1v1H0v7h1v1h1Zm0 0'
+        },
+        {
+            label: '@troshkin_pavel on X',
+            href: 'https://x.com/troshkin_pavel',
+            path: 'M1 3h1V2h2V1H0v1h1Zm-1 9h1v-1H0Zm1-1h1v-1H1Zm1-1h1V9H2Zm1-1h1V8H3Zm3 2h1V9H6ZM5 9h1V8H5ZM4 8h1V6H4ZM3 6h1V5H3Zm4 6h4v-1h-1v-1H9v1H7ZM2 5h1V3H2Zm6 5h1V8H8ZM7 8h1V7H7ZM6 7h1V5H6ZM5 5h1V4H5ZM4 4h1V2H4Zm3 1h1V4H7Zm1-1h1V3H8Zm1-1h1V2H9Zm1-1h1V1h-1Zm0 0'
+        }
+    ];
     const PLAY_BUTTON = {x: 840, y: 864, width: 240, height: 96};
     const TIMELINE_LINE_Y = 48; // progress line, below the timeline's top
     const TIMELINE_NODES = [
@@ -177,13 +190,32 @@ export function TeslaJoyride(elementId, options = {}) {
     }
     themeToggle.addEventListener('click', handleThemeClick);
 
+    const socialLinks = document.createElement('nav');
+    socialLinks.className = 'tb-social';
+    socialLinks.setAttribute('aria-label', 'Links');
+    socialLinks.hidden = true;
+    for (const {label, href, path} of SOCIAL_LINKS) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.setAttribute('aria-label', label);
+        link.title = label;
+        link.innerHTML = `<svg viewBox="0 0 12 12" aria-hidden="true"><path fill="currentColor" d="${path}"/></svg>`;
+        socialLinks.append(link);
+    }
+    // Mouse clicks drop focus so the next Space starts the game instead of being swallowed by the link.
+    socialLinks.addEventListener('click', (event) => {
+        if (event.detail > 0) event.target.closest('a')?.blur();
+    });
+
     // An explicit theme option (e.g. ?theme=) wins, then the last splash-screen choice, then the browser's light/dark setting.
     const savedTheme = readText(settings.themeKey);
     const browserTheme = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'day' : settings.theme;
     let themeName = options.theme ?? (Object.hasOwn(THEMES, savedTheme ?? '') ? savedTheme : browserTheme);
     applyTheme(themeName);
 
-    stage.append(backdrop, dim, canvas, themeToggle);
+    stage.append(backdrop, dim, canvas, themeToggle, socialLinks);
     container.replaceChildren(stage, status);
 
     container.addEventListener('pointerdown', handlePointerDown);
@@ -322,6 +354,7 @@ export function TeslaJoyride(elementId, options = {}) {
         hasLanded = false;
         status.textContent = 'Hold Space or the mouse button to fly. Press to start.';
         themeToggle.hidden = false;
+        socialLinks.hidden = false;
     }
 
     function applyTheme(name) {
@@ -348,6 +381,7 @@ export function TeslaJoyride(elementId, options = {}) {
         if (state !== State.READY || !isLoaded) return;
 
         themeToggle.hidden = true;
+        socialLinks.hidden = true;
         state = State.PLAYING;
         container.dataset.gameState = state;
         runs += 1;
