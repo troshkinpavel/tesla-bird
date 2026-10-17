@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs bird && node scripts/build.mjs joyride",
     "test": "node --test",
     "check": "npm run test && npm run build"
   }

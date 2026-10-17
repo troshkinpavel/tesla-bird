@@ -1,0 +1,97 @@
+.flappy-game {
+    overflow: hidden;
+    background: #000;
+    touch-action: none;
+    user-select: none;
+    cursor: pointer;
+}
+
+/* Stage is 1920×1080 or larger to match the window's shape (sized in flappy.js), then scaled to fill it. */
+.tb-stage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: #12123a;
+    transform-origin: center;
+}
+
+.tb-dim,
+.tb-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Three background tiles (normal, mirrored, normal), scrolled by joyride.js for parallax. */
+.tb-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    width: 300%;
+    height: 100%;
+    filter: saturate(0.6) blur(1.5px);
+    will-change: transform;
+}
+
+.tb-background {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tb-mirrored {
+    transform: scaleX(-1);
+}
+
+.tb-canvas {
+    image-rendering: pixelated;
+}
+
+/* NIGHT / DAWN / DAY switch under the splash-screen keys (stage px; the stage is scaled as a whole). */
+.tb-theme-toggle {
+    position: absolute;
+    top: calc(50% + 236px);
+    left: 50%;
+    display: flex;
+    border: 4px solid #eaf3ff;
+    transform: translateX(-50%);
+}
+
+.tb-theme-toggle[hidden] {
+    display: none;
+}
+
+.tb-theme-toggle button {
+    padding: 0 24px;
+    border: 0;
+    background: #0b0a1a;
+    color: #eaf3ff;
+    font: 40px/1.2 "Jersey 10", monospace;
+    letter-spacing: 3px;
+    cursor: pointer;
+}
+
+.tb-theme-toggle button[aria-pressed="true"] {
+    background: #eaf3ff;
+    color: #0b0a1a;
+}
+
+.tb-theme-toggle button:focus-visible {
+    outline: 4px solid #e0262f;
+    outline-offset: 4px;
+}
+
+.tb-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}

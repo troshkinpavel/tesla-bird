@@ -1,14 +1,25 @@
 import {createHash} from 'node:crypto';
 import {readdir, readFile, unlink, writeFile} from 'node:fs/promises';
-import {dirname, join} from 'node:path';
+import {dirname, join, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const scriptDirectory = join(projectRoot, 'flappy-assets', 'script');
-const styleDirectory = join(projectRoot, 'flappy-assets', 'style');
-const indexPath = join(projectRoot, 'index.html');
+// Each game bundles its own scripts and stylesheet. Images are shared in flappy-assets/image.
+const GAMES = {
+    bird: {directory: 'flappy-assets', page: 'index.html', main: 'flappy.js'},
+    joyride: {directory: 'joyride', page: 'joyride/index.html', main: 'joyride.js'}
+};
+const gameName = process.argv[2] ?? 'bird';
+const game = GAMES[gameName];
+if (!game) throw new Error(`Unknown game "${gameName}". Use one of: ${Object.keys(GAMES).join(', ')}`);
 
-const moduleOrder = ['config.js', 'physics.js', 'storage.js', 'flappy.js', 'app.js'];
+const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const scriptDirectory = join(projectRoot, game.directory, 'script');
+const styleDirectory = join(projectRoot, game.directory, 'style');
+const indexPath = join(projectRoot, game.page);
+// Path from the page to the game's folder: "flappy-assets/" for Tesla Bird, "" for joyride/index.html.
+const assetPrefix = relative(dirname(indexPath), join(projectRoot, game.directory)).replace(/(.)$/, '$1/');
+
+const moduleOrder = ['config.js', 'physics.js', 'storage.js', game.main, 'app.js'];
 const moduleSources = await Promise.all(
     moduleOrder.map((filename) => readFile(join(scriptDirectory, filename), 'utf8'))
 );
@@ -34,17 +45,17 @@ await writeFile(join(styleDirectory, styleFilename), stylesheet);
 
 const index = await readFile(indexPath, 'utf8');
 if (!index.includes('<!-- build:css -->') || !index.includes('<!-- build:js -->')) {
-    throw new Error('Build markers are missing from index.html');
+    throw new Error(`Build markers are missing from ${game.page}`);
 }
 
 const nextIndex = index
     .replace(
         /<!-- build:css -->[\s\S]*?<!-- \/build:css -->/,
-        `<!-- build:css -->\n  <link rel="stylesheet" href="flappy-assets/style/${styleFilename}">\n  <!-- /build:css -->`
+        `<!-- build:css -->\n  <link rel="stylesheet" href="${assetPrefix}style/${styleFilename}">\n  <!-- /build:css -->`
     )
     .replace(
         /<!-- build:js -->[\s\S]*?<!-- \/build:js -->/,
-        `<!-- build:js -->\n<script defer src="./flappy-assets/script/${scriptFilename}"></script>\n<!-- /build:js -->`
+        `<!-- build:js -->\n<script defer src="./${assetPrefix}script/${scriptFilename}"></script>\n<!-- /build:js -->`
     );
 
 if (nextIndex !== index) await writeFile(indexPath, nextIndex);

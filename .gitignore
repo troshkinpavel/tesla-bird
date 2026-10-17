@@ -24,3 +24,6 @@ flappy-assets/image/up.png
 
 # Promo images and clips (rendered locally, not part of the game)
 promo/
+
+# Contact sheet from scripts/make_sprites.py
+sprites-preview.png

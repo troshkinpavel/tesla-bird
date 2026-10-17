@@ -17,6 +17,17 @@ smoke from the wheels, and the car tilts as it climbs and falls.
   <img src="docs/gameplay.gif" alt="Gameplay: the Roadster boosts through gaps between rocket pillars while the telemetry strip counts score and altitude" width="640">
 </p>
 
+## Two games
+
+This repository holds two games that share the same sprites and backgrounds:
+
+| Game | Style | Play | Docs |
+| --- | --- | --- | --- |
+| **Tesla Bird** | Flappy Bird: tap to boost through gaps between rocket pillars | <https://troshkinpavel.github.io/tesla-bird/> | This README |
+| **Tesla Joyride** | Jetpack Joyride: hold to fly, dodge floating rockets and missiles, collect power-ups | <https://troshkinpavel.github.io/tesla-bird/joyride/> | [`joyride/README.md`](joyride/README.md) |
+
+The rest of this README is about Tesla Bird.
+
 ## Play
 
 Play online at <https://troshkinpavel.github.io/tesla-bird/> in a desktop
@@ -109,12 +120,13 @@ The game does not need Node.js to run.
 python3 -m http.server 4173
 ```
 
-Then open <http://localhost:4173/>. Any static file server works.
+Then open <http://localhost:4173/> for Tesla Bird or <http://localhost:4173/joyride/>
+for Tesla Joyride. Any static file server works.
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | Runs the unit tests with the built-in `node --test` runner. |
-| `npm run build` | Bundles the scripts and the stylesheet into content-hashed files and updates the references in `index.html`. |
+| `npm test` | Runs the unit tests of both games with the built-in `node --test` runner. |
+| `npm run build` | Bundles the scripts and the stylesheet of each game into content-hashed files and updates the references in `index.html` and `joyride/index.html`. To build one game, run `node scripts/build.mjs bird` or `node scripts/build.mjs joyride`. |
 | `npm run check` | Runs the tests, then the build. |
 
 If you change a file in `flappy-assets/script/` or `flappy-assets/style/`, run
@@ -166,10 +178,12 @@ flappy-assets/
   style/
     styles.css                 Source stylesheet
     styles.<hash>.css          Built stylesheet
-  image/                       Sprites and theme backgrounds
+  image/                       Sprites and theme backgrounds, shared by both games
+joyride/                       Tesla Joyride: page, script/, style/, art-src/ (sprite originals)
 docs/                          README images
-scripts/build.mjs              Build script for the hashed files
-test/                          Unit tests (node --test)
+scripts/build.mjs              Build script for the hashed files (bird or joyride)
+scripts/make_sprites.py        Turns joyride/art-src/ into game-size sprites
+test/                          Unit tests (node --test); Tesla Joyride's are in test/joyride/
 ```
 
 ## Saved data
