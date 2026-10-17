@@ -21,3 +21,6 @@ flappy-assets/image/up.png
 
 # Local Claude Code preview settings
 .claude/
+
+# Promo images and clips (rendered locally, not part of the game)
+promo/
