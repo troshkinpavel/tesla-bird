@@ -10,14 +10,21 @@ The idea comes from the new Tesla Roadster's thruster-powered flight at its
 smoke from the wheels, and the car tilts as it climbs and falls.
 
 <p align="center">
+  <a href="https://troshkinpavel.github.io/tesla-bird/"><strong>▶ Play in your browser</strong></a>
+</p>
+
+<p align="center">
   <img src="docs/gameplay.gif" alt="Gameplay: the Roadster boosts through gaps between rocket pillars while the telemetry strip counts score and altitude" width="640">
 </p>
 
 ## Play
 
-Open `index.html` in a desktop browser. No build step is needed: the built
-files are committed. See [Run locally](#run-locally) to serve it over HTTP or to
-change the code.
+Play online at <https://troshkinpavel.github.io/tesla-bird/> in a desktop
+browser.
+
+To play offline, open `index.html` from a copy of this repository. No build step
+is needed: the built files are committed. See [Run locally](#run-locally) to
+serve it over HTTP or to change the code.
 
 ## Controls
 
